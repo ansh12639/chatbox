@@ -26,10 +26,10 @@ def chat_llm(user_message: str) -> str:
                 {"role": "user", "content": user_message}
             ]
         )
-        return response.choices[0].message.content     # ✔ correct
-
+        return response.choices[0].message.content   # FIXED
     except Exception as e:
         return f"(Error from LLM: {str(e)})"
+
 
 
 # ----------------------------------------------------
