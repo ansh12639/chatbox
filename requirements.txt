@@ -3,7 +3,3 @@ uvicorn
 openai
 python-multipart
 requests
-os
-time
-random
-json
