@@ -79,6 +79,8 @@ async def telegram_webhook(request: Request):
 # ----------------------------------------------------
 # 6. WHATSAPP WEBHOOK ENDPOINT (Twilio)
 # ----------------------------------------------------
+from fastapi.responses import Response
+
 @app.post("/whatsapp_webhook")
 async def whatsapp_webhook(request: Request):
     form = await request.form()
@@ -88,12 +90,13 @@ async def whatsapp_webhook(request: Request):
 
     bot_reply = chat_llm(user_msg)
 
-    # Twilio XML response format
-    return f"""
+    twilio_xml = f"""
     <Response>
         <Message>{bot_reply}</Message>
     </Response>
     """
+
+    return Response(content=twilio_xml, media_type="application/xml")
 
 
 # ----------------------------------------------------
