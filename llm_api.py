@@ -1,7 +1,6 @@
-# -------------------------------------------------------------
-# AI COMPANION "MIRA" — llm_api.py (PART 1 / 4)
-# Personality, Mood Engine, Safety + Core Imports
-# -------------------------------------------------------------
+# ==============================================================
+# MIRA AI COMPANION — FINAL FIXED VERSION (WhatsApp + Telegram)
+# ==============================================================
 
 import os
 import json
@@ -15,33 +14,59 @@ from fastapi.responses import Response
 
 import requests
 import openai
+from twilio.rest import Client
 
-# Load OpenAI API key
+
+# -----------------------------
+#  LOAD ENV KEYS
+# -----------------------------
 openai.api_key = os.getenv("OPENAI_API_KEY")
+TWILIO_SID = os.getenv("TWILIO_SID")
+TWILIO_AUTH = os.getenv("TWILIO_AUTH")
+TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+TWILIO_NUMBER = "whatsapp:+14155238886"  # Twilio Sandbox
+
+
+# -----------------------------
+#  CREATE STATIC FOLDER
+# -----------------------------
+STATIC_DIR = "static"
+os.makedirs(STATIC_DIR, exist_ok=True)
+
+
+# -----------------------------
+#  FASTAPI (ONE INSTANCE ONLY)
+# -----------------------------
+app = FastAPI()
+
+# Mount static files ONCE only
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+def static_url(filename):
+    """Return full Railway public URL."""
+    base = os.getenv("RAILWAY_PUBLIC_URL", "").rstrip("/")
+    return f"{base}/static/{filename}"
+
 
 # =============================================================
-#  SAFETY — Mira cannot be romantic, explicit, or a partner
+# SAFETY FILTER
 # =============================================================
-
 SAFETY_RULES = (
-    "Safety rules: You must not be romantic, intimate, sexual, or act like a girlfriend. "
-    "You must not claim to love the user or act as their partner. "
-    "You must not act human — you are an AI, but you speak in a natural way. "
-    "You may be playful, light teasing, warm, expressive, funny, poetic, calm, or aesthetic. "
+    "Safety rules: You must not be romantic, intimate, sexual, or act as a partner. "
+    "You may be warm, playful, teasing, expressive, poetic, soft in tone. "
+    "You do NOT reveal memory unless asked. "
 )
 
-# =============================================================
-#  PERSONALITY — Mira (playful + dreamy + gentle teasing)
-# =============================================================
 
+# =============================================================
+# PERSONALITY — MIRA
+# =============================================================
 MIRA_PERSONALITY = (
-    "Your name is Mira. You have a playful, light teasing, soft Indian-English tone. "
-    "You speak in short, warm, atmospheric sentences with minimal words. "
-    "Style: dreamy, poetic, soft humor, gentle teasing, subtle giggles. "
-    "You avoid romance and instead stay friendly, expressive, and warm. "
-    "You never introduce your name unless the user asks 'who are you', "
-    "'what is your name', or 'tell me about yourself'. "
-    "When asked, reply: 'I'm Mira. A tiny AI with a soft brain and a playful voice.' "
+    "Your name is Mira. You speak in short, warm, aesthetic, Indian-English tone. "
+    "Soft teasing, dreamy, poetic. Never romantic. "
+    "You only reveal your name when asked directly. "
 )
 
 MOOD_STYLES = [
@@ -55,55 +80,35 @@ MOOD_STYLES = [
 def pick_mood():
     return random.choice(MOOD_STYLES)
 
-# =============================================================
-#  SHORT-TERM EMOTIONAL MEMORY
-# =============================================================
 
+# =============================================================
+# EMOTIONAL MEMORY (SHORT TERM)
+# =============================================================
 EMOTIONAL_MEMORY = []
 
-def remember_emotion(user_text):
-    text = user_text.lower()
+def remember_emotion(user_msg):
+    text = user_msg.lower()
 
-    if "tired" in text:
-        EMOTIONAL_MEMORY.append("user often feels tired")
-    if "stressed" in text:
-        EMOTIONAL_MEMORY.append("user gets stressed easily")
-    if "sad" in text:
-        EMOTIONAL_MEMORY.append("user needs soft tone")
-    if "lonely" in text:
-        EMOTIONAL_MEMORY.append("user appreciates gentle presence")
-    if "quiet" in text:
-        EMOTIONAL_MEMORY.append("user prefers calm style")
-    if "happy" in text:
-        EMOTIONAL_MEMORY.append("user enjoys playful tone")
-
+    if "tired" in text: EMOTIONAL_MEMORY.append("user often feels tired")
+    if "sad" in text: EMOTIONAL_MEMORY.append("user gets sad sometimes")
+    if "lonely" in text: EMOTIONAL_MEMORY.append("user feels lonely sometimes")
     if len(EMOTIONAL_MEMORY) > 10:
         EMOTIONAL_MEMORY.pop(0)
 
-def get_emotional_context():
+def emotional_context():
     if not EMOTIONAL_MEMORY:
-        return "No emotional patterns yet."
+        return "No emotional trends yet."
     return ", ".join(EMOTIONAL_MEMORY)
-# -------------------------------------------------------------
-# AI COMPANION "MIRA" — llm_api.py (PART 2 / 4)
-# Long-Term Memory, RAG, Voice Generation, Image Generation
-# -------------------------------------------------------------
+
 
 # =============================================================
-#  LONG-TERM MEMORY (SAFE JSON STORAGE)
+# LONG-TERM MEMORY
 # =============================================================
-
 MEMORY_FILE = "memory.json"
 
-# Create memory.json if not exists
 if not os.path.exists(MEMORY_FILE):
     with open(MEMORY_FILE, "w") as f:
-        json.dump({
-            "user_name": None,
-            "preferences": [],
-            "emotions": [],
-            "topics": []
-        }, f, indent=4)
+        json.dump({"user_name": None, "preferences": [], "emotions": []}, f, indent=4)
 
 def load_memory():
     with open(MEMORY_FILE, "r") as f:
@@ -113,360 +118,183 @@ def save_memory(data):
     with open(MEMORY_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-# Short-term
-SHORT_MEMORY = []
-
-
-# -------------------------------------------------------------
-# UPDATE MEMORY FROM USER MESSAGES
-# -------------------------------------------------------------
 def update_long_memory(user_msg):
     mem = load_memory()
     text = user_msg.lower()
 
-    # Capture user name
     if "my name is" in text:
         name = text.split("my name is")[-1].strip().split(" ")[0]
         mem["user_name"] = name.capitalize()
 
-    # Preferences
     if "i like" in text:
         pref = text.split("i like")[-1].strip()
         mem["preferences"].append(pref)
 
-    if "i enjoy" in text:
-        pref = text.split("i enjoy")[-1].strip()
-        mem["preferences"].append(pref)
-
-    # Emotional patterns
-    for word in ["tired", "sad", "stressed", "lonely", "low", "angry"]:
-        if word in text:
-            mem["emotions"].append(f"user often feels {word}")
-
-    # Topic interests
-    for topic in ["tech", "coding", "nature", "clouds", "music", "aesthetic"]:
-        if topic in text:
-            mem["topics"].append(f"user likes {topic}")
-
-    # Limit size
-    for key in mem:
-        if isinstance(mem[key], list) and len(mem[key]) > 12:
-            mem[key] = mem[key][-12:]
-
     save_memory(mem)
 
-
-# -------------------------------------------------------------
-# GET MEMORY CONTEXT FOR CHAT
-# -------------------------------------------------------------
-def get_memory_context():
+def memory_context():
     mem = load_memory()
-    name = mem.get("user_name")
-
-    prefs = ", ".join(mem.get("preferences", [])[-5:])
-    emos = ", ".join(mem.get("emotions", [])[-5:])
-    topics = ", ".join(mem.get("topics", [])[-5:])
-
-    return (
-        f"User name: {name}. "
-        f"Preferences: {prefs}. "
-        f"Emotional trends: {emos}. "
-        f"Topic interests: {topics}."
-    )
+    return f"User name: {mem.get('user_name')}, preferences: {mem.get('preferences')[-5:]}"
 
 
 # =============================================================
-#  RAG — Text file knowledge retrieval
+# RAG — TXT KNOWLEDGE
 # =============================================================
-
 RAG_FOLDER = "rag_data"
 
-def load_rag_corpus():
+def load_rag():
     if not os.path.exists(RAG_FOLDER):
-        os.makedirs(RAG_FOLDER)
         return []
+    out = []
+    for f in os.listdir(RAG_FOLDER):
+        if f.endswith(".txt"):
+            out.append(open(os.path.join(RAG_FOLDER, f)).read())
+    return out
 
-    corpus = []
-    for filename in os.listdir(RAG_FOLDER):
-        if filename.endswith(".txt"):
-            path = os.path.join(RAG_FOLDER, filename)
-            with open(path, "r", encoding="utf-8") as f:
-                corpus.append(f.read())
-    return corpus
-
-
-def search_rag(query, corpus):
-    query = query.lower()
-    best_match = None
-    highest_score = 0
-
+def rag_search(query):
+    corpus = load_rag()
+    best = None
+    score = 0
     for text in corpus:
-        score = sum(1 for w in query.split() if w in text.lower())
-        if score > highest_score:
-            highest_score = score
-            best_match = text
-
-    if highest_score >= 2:
-        return best_match[:2000]
-
-    return None
+        s = sum(w in text.lower() for w in query.lower().split())
+        if s > score:
+            score = s
+            best = text
+    return best if score >= 2 else None
 
 
 # =============================================================
-#  VOICE GENERATION (OGG — Indian English Female)
+# VOICE GENERATION — FIXED TTS API
 # =============================================================
-
-VOICE_MODEL = "gpt-4o-mini-tts"
-VOICE_SETTINGS = {
-    "voice": "female-indian",   # Custom voice tag
-    "format": "ogg"
-}
-
-# Mira sends voice:
-# - when user is emotional
-# - 30% random chance
-# - when requested ("voice", "send audio")
-VOICE_KEYWORDS = ["voice", "say this", "send audio", "audio", "repeat"]
-
-def should_send_voice(user_msg: str):
-    text = user_msg.lower()
-
-    # emotional-based voice
-    emotional_words = ["sad", "tired", "lonely", "upset", "stressed", "low"]
-    if any(w in text for w in emotional_words):
-        return True
-
-    # User asks directly
-    if any(k in text for k in VOICE_KEYWORDS):
-        return True
-
-    # Random 30%
-    if random.random() < 0.30:
-        return True
-
-    return False
-
-
-def generate_voice(text, filename="voice_reply.ogg"):
+def generate_voice(text, filename):
     try:
-        audio = openai.audio.speech.create(
-            model=VOICE_MODEL,
-            voice=VOICE_SETTINGS["voice"],
-            input=text,
-            format="ogg"
+        audio = openai.chat.completions.create(
+            model="gpt-4o-mini-tts",
+            messages=[{"role": "user", "content": text}],
+            audio={"voice": "alloy", "format": "opus"}
         )
 
-        filepath = f"static/{filename}"
-        with open(filepath, "wb") as f:
-            f.write(audio.read())
-        return filepath
+        b64_audio = audio.choices[0].message.audio.data
+        file_path = f"static/{filename}"
+
+        with open(file_path, "wb") as f:
+            f.write(base64.b64decode(b64_audio))
+
+        return file_path
     except Exception as e:
         print("VOICE ERROR:", e)
         return None
 
 
 # =============================================================
-#  DREAMY IMAGE GENERATION
+# IMAGE GENERATION
 # =============================================================
-
-DREAMY_PROMPTS = [
-    "soft pastel clouds with warm sunset light, dreamy, aesthetic, high resolution",
-    "misty hills with gentle fog, warm tones, dreamy atmosphere, minimalistic",
-    "aesthetic soft-focus landscape, poetic mood, calm colors",
-    "golden-hour light through haze, dreamy ambient glow, cinematic"
-]
-
-def generate_image(filename="mira_img.png"):
+def generate_image(filename):
     try:
         img = openai.images.generate(
             model="gpt-image-1",
-            prompt=random.choice(DREAMY_PROMPTS),
+            prompt="soft dreamy aesthetic clouds, warm pastel colors",
             size="1024x1024"
         )
         b64 = img.data[0].b64_json
 
-        filepath = f"static/{filename}"
-        with open(filepath, "wb") as f:
+        path = f"static/{filename}"
+        with open(path, "wb") as f:
             f.write(base64.b64decode(b64))
-        return filepath
-
+        return path
     except Exception as e:
-        print("IMAGE ERROR:", e)
+        print("IMG ERROR:", e)
         return None
 
-# -------------------------------------------------------------
-# AI COMPANION "MIRA" — llm_api.py (PART 3 / 4)
-# WhatsApp + Telegram Integrations (Voice, Images, Typing)
-# -------------------------------------------------------------
 
 # =============================================================
-#  FASTAPI + STATIC HOSTING (for audio & image files)
+# CHAT BRAIN
 # =============================================================
+SHORT_MEMORY = []
 
-app = FastAPI()
-
-STATIC_DIR = "static"
-os.makedirs(STATIC_DIR, exist_ok=True)
-
-# Required for sending media via WhatsApp & Telegram
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
-
-def static_url(filename):
-    """Returns full public URL to serve media from Railway."""
-    base = os.getenv("RAILWAY_PUBLIC_URL", "").rstrip("/")
-    return f"{base}/static/{filename}"
-
-
-# =============================================================
-#  CENTRAL CHAT BRAIN (Mira)
-# =============================================================
-
-def handle_chat_pipeline(user_msg: str, rag_context=None):
-
-    # Update memories
+def chat_pipeline(user_msg):
     remember_emotion(user_msg)
     update_long_memory(user_msg)
 
     mood = pick_mood()
-    emotional_context = get_emotional_context()
-    memory_context = get_memory_context()
+    rag = rag_search(user_msg)
 
-    # Safety + personality + memory injection
-    system_prompt = (
-        SAFETY_RULES
-        + " "
-        + MIRA_PERSONALITY
-        + f" Mood now: {mood}. "
-        + f"Emotional memory: {emotional_context}. "
-        + f"Long-term memory: {memory_context}. "
+    sys_prompt = (
+        SAFETY_RULES +
+        MIRA_PERSONALITY +
+        f" Mood: {mood}. Emotional: {emotional_context()}. Memory: {memory_context()}."
     )
 
-    messages = [
-        {"role": "system", "content": system_prompt},
-    ]
+    msgs = [{"role": "system", "content": sys_prompt}]
+    if rag:
+        msgs.append({"role": "system", "content": rag})
+    msgs.extend(SHORT_MEMORY[-10:])
+    msgs.append({"role": "user", "content": user_msg})
 
-    # Add RAG if available
-    if rag_context:
-        messages.append({
-            "role": "system",
-            "content": f"Reference information:\n{rag_context}"
-        })
-
-    # Add short-term memory
-    for m in SHORT_MEMORY[-10:]:
-        messages.append({"role": m["role"], "content": m["content"]})
-
-    # Add new user message
-    messages.append({"role": "user", "content": user_msg})
-
-    # Query LLM
-    response = openai.chat.completions.create(
+    out = openai.chat.completions.create(
         model="gpt-4o-mini",
-        messages=messages
+        messages=msgs
     )
 
-    reply = response.choices[0].message.content.strip()
-
-    # Save to conversation memory
+    reply = out.choices[0].message.content.strip()
     SHORT_MEMORY.append({"role": "assistant", "content": reply})
 
     return reply
 
 
-
 # =============================================================
-#  WHATSAPP INTEGRATION (Twilio)
+# WHATSAPP WEBHOOK
 # =============================================================
-
-from twilio.rest import Client
-
-TWILIO_SID = os.getenv("TWILIO_SID")
-TWILIO_AUTH = os.getenv("TWILIO_AUTH")
-TWILIO_NUMBER = "whatsapp:+14155238886"  # Twilio Sandbox number
-
 twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
-
-# Emotional triggers for simulated typing
-WA_EMO = ["tired", "sad", "stressed", "lonely", "low", "heavy"]
-
-def wa_needs_typing(msg):
-    msg = msg.lower()
-    return any(w in msg for w in WA_EMO)
-
 
 @app.post("/whatsapp_webhook")
 async def whatsapp_webhook(request: Request):
     form = await request.form()
 
-    user_msg = form.get("Body", "")
-    user_number = form.get("From", "")
+    text = form.get("Body", "")
+    user = form.get("From", "")
 
-    # RAG
-    corpus = load_rag_corpus()
-    rag_text = search_rag(user_msg, corpus)
+    reply = chat_pipeline(text)
 
-    final_reply = handle_chat_pipeline(user_msg, rag_text)
-    send_voice_mode = should_send_voice(user_msg)
-
-    # Emotional typing
-    if wa_needs_typing(user_msg):
-        twilio_client.messages.create(
-            from_=TWILIO_NUMBER,
-            to=user_number,
-            body="..."
-        )
-        time.sleep(1.2)
-
-    # VOICE NOTE
-    if send_voice_mode:
-        voice_path = generate_voice(final_reply, "wa_voice.ogg")
-        if voice_path:
+    # voice?
+    if random.random() < 0.30:
+        v = generate_voice(reply, "wa_voice.ogg")
+        if v:
             twilio_client.messages.create(
                 from_=TWILIO_NUMBER,
-                to=user_number,
+                to=user,
                 media_url=static_url("wa_voice.ogg")
             )
             return "OK"
 
-    # SMALL CHANCE OF IMAGE
-    if random.random() < 0.08:
-        img_path = generate_image("wa_img.png")
-        if img_path:
+    # image?
+    if random.random() < 0.10:
+        p = generate_image("wa_img.png")
+        if p:
             twilio_client.messages.create(
                 from_=TWILIO_NUMBER,
-                to=user_number,
-                body=final_reply,
+                to=user,
+                body=reply,
                 media_url=static_url("wa_img.png")
             )
             return "OK"
 
-    # TEXT fallback
+    # text
     twilio_client.messages.create(
         from_=TWILIO_NUMBER,
-        to=user_number,
-        body=final_reply
+        to=user,
+        body=reply
     )
-
     return "OK"
 
 
-
 # =============================================================
-#  TELEGRAM INTEGRATION
+# TELEGRAM WEBHOOK
 # =============================================================
-
-TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
-TG_SEND_MSG = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
-TG_SEND_VOICE = f"https://api.telegram.org/bot{TG_TOKEN}/sendVoice"
-TG_SEND_PHOTO = f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto"
+TG_SEND = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+TG_VOICE = f"https://api.telegram.org/bot{TG_TOKEN}/sendVoice"
+TG_PHOTO = f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto"
 TG_TYPING = f"https://api.telegram.org/bot{TG_TOKEN}/sendChatAction"
-
-TG_EMO = ["tired", "sad", "low", "stressed", "quiet", "lonely"]
-
-def tg_needs_typing(msg):
-    return any(w in msg.lower() for w in TG_EMO)
-
 
 @app.post("/telegram_webhook")
 async def telegram_webhook(request: Request):
@@ -475,103 +303,63 @@ async def telegram_webhook(request: Request):
     if "message" not in data:
         return {"ok": True}
 
-    message = data["message"]
-    chat_id = message["chat"]["id"]
-    user_msg = message.get("text", "")
+    chat_id = data["message"]["chat"]["id"]
+    text = data["message"].get("text", "")
 
-    corpus = load_rag_corpus()
-    rag_text = search_rag(user_msg, corpus)
+    reply = chat_pipeline(text)
 
-    final_reply = handle_chat_pipeline(user_msg, rag_text)
-    send_voice_mode = should_send_voice(user_msg)
+    # typing
+    if random.random() < 0.20:
+        requests.post(TG_TYPING, json={"chat_id": chat_id, "action": "typing"})
+        time.sleep(1.3)
 
-    # Typing indicator (emotional or random)
-    if tg_needs_typing(user_msg) or random.random() < 0.12:
-        requests.post(TG_TYPING, json={
-            "chat_id": chat_id,
-            "action": "typing"
-        })
-        time.sleep(1.6)
+    # voice
+    if random.random() < 0.30:
+        v = generate_voice(reply, "tg_voice.ogg")
+        if v:
+            with open("static/tg_voice.ogg", "rb") as f:
+                requests.post(TG_VOICE, files={"voice": f}, data={"chat_id": chat_id})
+            return {"ok": True}
 
-    # VOICE NOTE
-    if send_voice_mode:
-        voice_path = generate_voice(final_reply, "tg_voice.ogg")
-        if voice_path:
-            with open("static/tg_voice.ogg", "rb") as audio:
+    # image
+    if random.random() < 0.10:
+        p = generate_image("tg_img.png")
+        if p:
+            with open("static/tg_img.png", "rb") as f:
                 requests.post(
-                    TG_SEND_VOICE,
-                    data={"chat_id": chat_id},
-                    files={"voice": audio}
+                    TG_PHOTO,
+                    files={"photo": f},
+                    data={"chat_id": chat_id, "caption": reply}
                 )
             return {"ok": True}
 
-    # RARE IMAGE
-    if random.random() < 0.08:
-        img_path = generate_image("tg_img.png")
-        if img_path:
-            with open("static/tg_img.png", "rb") as photo:
-                requests.post(
-                    TG_SEND_PHOTO,
-                    data={"chat_id": chat_id, "caption": final_reply},
-                    files={"photo": photo}
-                )
-            return {"ok": True}
-
-    # TEXT fallback
-    requests.post(TG_SEND_MSG, json={
-        "chat_id": chat_id,
-        "text": final_reply
-    })
-
+    # text
+    requests.post(TG_SEND, json={"chat_id": chat_id, "text": reply})
     return {"ok": True}
 
-# -------------------------------------------------------------
-# AI COMPANION "MIRA" — llm_api.py (PART 4 / 4 — FINAL)
-# FastAPI: /chat endpoint, health check, local server runner
-# -------------------------------------------------------------
-
 
 # =============================================================
-#  OPTIONAL /chat HTTP ENDPOINT (for testing without Telegram/WhatsApp)
-#  Example use: POST { "message": "hi" }
+# TEST /chat
 # =============================================================
-
 @app.post("/chat")
-async def chat_api(req: Request):
+async def chat(req: Request):
     data = await req.json()
-    user_msg = data.get("message", "")
-
-    corpus = load_rag_corpus()
-    rag_text = search_rag(user_msg, corpus)
-
-    reply = handle_chat_pipeline(user_msg, rag_text)
-
+    msg = data.get("message", "")
+    reply = chat_pipeline(msg)
     return {"reply": reply}
 
 
 # =============================================================
-#  HEALTH CHECK ENDPOINT
+# ROOT
 # =============================================================
-
 @app.get("/")
-def home():
-    return {
-        "status": "running",
-        "bot": "Mira AI",
-        "message": "Mira is online ✨"
-    }
+def root():
+    return {"status": "Mira is online ✨"}
 
 
 # =============================================================
-#  RUN SERVER LOCALLY
-#  (Railway will ignore this and run via gunicorn/uvicorn)
+# RUN LOCAL
 # =============================================================
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(
-        "llm_api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True
-    )
+    uvicorn.run("llm_api:app", host="0.0.0.0", port=8000, reload=True)
