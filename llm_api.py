@@ -90,13 +90,14 @@ async def whatsapp_webhook(request: Request):
 
     bot_reply = chat_llm(user_msg)
 
-    twilio_xml = f"""
+    xml_response = f"""
     <Response>
         <Message>{bot_reply}</Message>
     </Response>
     """
 
-    return Response(content=twilio_xml, media_type="application/xml")
+    return Response(content=xml_response, media_type="application/xml")
+
 
 
 # ----------------------------------------------------
