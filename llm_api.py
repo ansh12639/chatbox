@@ -1,6 +1,6 @@
 # ================================
-# MIRA V3 — Free Edition
-# Groq LLM + HF Voice + HF Images
+# Mira V4 – Stable Free Edition
+# Groq Llama3.1 + HF Kokoro TTS + SDXL
 # ================================
 
 import os
@@ -8,60 +8,66 @@ import json
 import random
 import base64
 import time
-from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
-from huggingface_hub import InferenceClient
-from groq import Groq
-from pydub import AudioSegment
 import requests
 
-# ---------------------------------
-# Load Keys
-# ---------------------------------
-HF_KEY = os.getenv("HF_API_KEY")
+from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
+
+from huggingface_hub import InferenceClient
+from groq import Groq
+from twilio.rest import Client
+
+# -------------------------------
+# ENV KEYS
+# -------------------------------
 GROQ_KEY = os.getenv("GROQ_API_KEY")
+HF_KEY = os.getenv("HF_API_KEY")
+TG_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+RAILWAY_URL = os.getenv("RAILWAY_PUBLIC_URL", "").rstrip("/")
 
-hf_client = InferenceClient(token=HF_KEY)
-groq_client = Groq(api_key=GROQ_KEY)
+TWILIO_SID = os.getenv("TWILIO_SID")
+TWILIO_AUTH = os.getenv("TWILIO_AUTH")
+TWILIO_NUMBER = "whatsapp:+14155238886"
 
-# ---------------------------------
-# FastAPI + Static
-# ---------------------------------
+hf = InferenceClient(token=HF_KEY)
+groq = Groq(api_key=GROQ_KEY)
+twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
+
+# -------------------------------
+# FASTAPI + STATIC
+# -------------------------------
 app = FastAPI()
-STATIC_DIR = "static"
-os.makedirs(STATIC_DIR, exist_ok=True)
-app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+os.makedirs("static", exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-def static_url(filename):
-    base = os.getenv("RAILWAY_PUBLIC_URL", "").rstrip("/")
-    return f"{base}/static/{filename}"
+def static_url(file):
+    return f"{RAILWAY_URL}/static/{file}"
 
-# ---------------------------------
+# -------------------------------
 # Personality + Safety
-# ---------------------------------
+# -------------------------------
 SAFETY = (
-    "You must NOT be romantic, explicit, sexual. "
-    "You are Mira, soft playful, poetic, aesthetic. "
+    "You must not be romantic or explicit. "
+    "Stay friendly, warm, poetic, playful."
 )
 
 PERSONALITY = (
-    "You speak short, warm, Indian-English tone. "
-    "Style: dreamy, soft teasing, poetic visuals. "
+    "You are Mira. Speak short, soft, warm, dreamy, Indian-English tone. "
+    "Light teasing, poetic visuals, gentle energy."
 )
 
 MOODS = [
     "soft like early morning fog",
-    "warm as afternoon chai",
-    "gentle like drifting clouds",
-    "quiet and thoughtful",
+    "warm like evening chai",
+    "gentle like drifting clouds"
 ]
 
 def mood():
     return random.choice(MOODS)
 
-# ---------------------------------
+# -------------------------------
 # Memory System
-# ---------------------------------
+# -------------------------------
 MEMORY_FILE = "memory.json"
 if not os.path.exists(MEMORY_FILE):
     with open(MEMORY_FILE, "w") as f:
@@ -71,164 +77,139 @@ def load_mem():
     with open(MEMORY_FILE) as f:
         return json.load(f)
 
-def save_mem(data):
+def save_mem(m):
     with open(MEMORY_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+        json.dump(m, f, indent=4)
 
-# ---------------------------------
-# Groq LLM Chat
-# ---------------------------------
+# -------------------------------
+# GROQ LLM — working model
+# -------------------------------
 def ask_groq(msg, memory_text):
     prompt = (
-        SAFETY
-        + PERSONALITY
-        + f"\nMemory: {memory_text}\nUser: {msg}\nMira:"
+        SAFETY + "\n" +
+        PERSONALITY + "\n" +
+        f"Mood: {mood()}\n" +
+        f"Memory: {memory_text}\n" +
+        f"User: {msg}\nMira:"
     )
 
-    response = groq_client.chat.completions.create(
-        model="llama-3.1-8b-instant",
+    response = groq.chat.completions.create(
+        model="llama-3.1-8b-instant",   # ✔ WORKING MODEL
         messages=[{"role": "user", "content": prompt}]
     )
 
     return response.choices[0].message.content.strip()
 
-
-
-
-# ---------------------------------
-# Voice Generation - HuggingFace Bark Small
-# ---------------------------------
+# -------------------------------
+# TTS – HF Kokoro (free + stable)
+# -------------------------------
 def make_voice(text):
-    output = hf_client.text_to_speech(
-        model="suno/bark-small",
+    output = hf.text_to_speech(
+        model="hexgrad/Kokoro-82M",    # ✔ WORKING FREE MODEL
         text=text
     )
-    ogg_path = "static/mira_voice.ogg"
-    with open(ogg_path, "wb") as f:
+    path = "static/mira_voice.ogg"
+    with open(path, "wb") as f:
         f.write(output)
-    return ogg_path
+    return path
 
-# ---------------------------------
-# Image Generation - SDXL Lite
-# ---------------------------------
+# -------------------------------
+# Image – SDXL Turbo (free)
+# -------------------------------
 def make_image():
-    result = hf_client.text_to_image(
+    img = hf.text_to_image(
         model="stabilityai/sdxl-turbo",
-        prompt="dreamy soft aesthetic golden clouds, warm cinematic light"
+        prompt="dreamy soft aesthetic golden clouds, warm cinematic haze"
     )
-    img_path = "static/mira_img.png"
-    result.save(img_path)
-    return img_path
+    path = "static/mira_img.png"
+    img.save(path)
+    return path
 
-# ---------------------------------
-# Central Pipeline
-# ---------------------------------
+# -------------------------------
+# Pipeline
+# -------------------------------
 def pipeline(user_msg):
     mem = load_mem()
 
+    # simple name learning
     if "my name is" in user_msg.lower():
         name = user_msg.split("my name is")[-1].strip().split(" ")[0]
         mem["name"] = name.capitalize()
         save_mem(mem)
 
     memory_text = json.dumps(mem)
-
     reply = ask_groq(user_msg, memory_text)
-
     return reply
 
-# ---------------------------------
+# -------------------------------
 # WhatsApp Webhook
-# ---------------------------------
-from twilio.rest import Client
-TWILIO_SID = os.getenv("TWILIO_SID")
-TWILIO_AUTH = os.getenv("TWILIO_AUTH")
-twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
-
-TWILIO_NUMBER = "whatsapp:+14155238886"
-
+# -------------------------------
 @app.post("/whatsapp_webhook")
-async def wa(request: Request):
-    form = await request.form()
+async def wa(req: Request):
+    form = await req.form()
     msg = form.get("Body", "")
     user = form.get("From", "")
 
     reply = pipeline(msg)
 
-    # 30% chance send voice
-    if random.random() < 0.3:
-        voice = make_voice(reply)
+    # Twilio sandbox limit reached → send text only
+    try:
         twilio_client.messages.create(
             from_=TWILIO_NUMBER,
             to=user,
-            media_url=static_url("mira_voice.ogg")
-        )
-        return "OK"
-
-    # 10% chance send image
-    if random.random() < 0.1:
-        img = make_image()
-        twilio_client.messages.create(
-            from_=TWILIO_NUMBER,
-            to=user,
-            media_url=static_url("mira_img.png"),
             body=reply
         )
-        return "OK"
+    except:
+        pass
 
-    twilio_client.messages.create(
-        from_=TWILIO_NUMBER,
-        to=user,
-        body=reply
-    )
     return "OK"
 
-# ---------------------------------
+# -------------------------------
 # Telegram Webhook
-# ---------------------------------
+# -------------------------------
 @app.post("/telegram_webhook")
-async def tg(request: Request):
-    data = await request.json()
+async def tg(req: Request):
+    data = await req.json()
     if "message" not in data:
         return {"ok": True}
 
     msg = data["message"].get("text", "")
-    chat = data["message"]["chat"]["id"]
+    chat_id = data["message"]["chat"]["id"]
 
     reply = pipeline(msg)
 
-    # Voice sometimes
+    # 30% voice
     if random.random() < 0.3:
         path = make_voice(reply)
         with open(path, "rb") as f:
             requests.post(
-                f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendVoice",
-                data={"chat_id": chat},
+                f"https://api.telegram.org/bot{TG_TOKEN}/sendVoice",
+                data={"chat_id": chat_id},
                 files={"voice": f}
             )
             return {"ok": True}
 
-    # Image sometimes
+    # 10% image
     if random.random() < 0.1:
-        img = make_image()
-        with open(img, "rb") as f:
+        path = make_image()
+        with open(path, "rb") as f:
             requests.post(
-                f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendPhoto",
-                data={"chat_id": chat},
+                f"https://api.telegram.org/bot{TG_TOKEN}/sendPhoto",
+                data={"chat_id": chat_id},
                 files={"photo": f}
             )
             return {"ok": True}
 
-    # Fallback text
+    # fallback
     requests.post(
-        f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
-        json={"chat_id": chat, "text": reply}
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        json={"chat_id": chat_id, "text": reply}
     )
     return {"ok": True}
 
-# ---------------------------------
-# Home
-# ---------------------------------
+# -------------------------------
+# Health
+# -------------------------------
 @app.get("/")
 def home():
-    return {"status": "OK", "bot": "Mira V3 Free"}
+    return {"status": "OK", "bot": "Mira V4 Stable Free"}
