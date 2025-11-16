@@ -86,9 +86,10 @@ def ask_groq(msg, memory_text):
     )
 
     response = groq_client.chat.completions.create(
-        model="llama3-8b-8192",
+        model="llama3-8b-8192-reasoning",
         messages=[{"role": "user", "content": prompt}]
     )
+
     return response.choices[0].message.content.strip()
 
 
