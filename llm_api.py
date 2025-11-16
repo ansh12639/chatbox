@@ -223,3 +223,4 @@ async def tg(request: Request):
 @app.get("/")
 def home():
     return {"status": "Mira V6 Ready", "voice": "Clone Active"}
+
