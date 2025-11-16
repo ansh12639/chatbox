@@ -274,3 +274,102 @@ async def telegram(request: Request):
 @app.get("/")
 def home():
     return {"status": "Mira V6 Ultra Human Running!"}
+
+############################################################
+# MANUAL TEST – /chat (JSON POST)
+############################################################
+@app.post("/chat")
+async def chat_api(request: Request):
+    body = await request.json()
+    message = body.get("message", "")
+    reply = pipeline(message)
+
+    return {"reply": reply}
+
+
+############################################################
+# VOICE TEST – /voice_test?text=hello
+############################################################
+@app.get("/voice_test")
+async def voice_test(text: str = "hello from Mira"):
+    path = generate_voice(text)
+    if path:
+        return {"voice_url": static_url("mira_voice.ogg")}
+    return {"error": "Voice generation failed"}
+
+
+############################################################
+# IMAGE TEST – /image_test?prompt=cute girl
+############################################################
+@app.get("/image_test")
+async def image_test(prompt: str = "cute aesthetic indian girl"):
+    img = generate_image(prompt)
+    if img:
+        return {"image_url": static_url("mira_img.png")}
+    return {"error": "Image generation failed"}
+
+
+############################################################
+# DASHBOARD – Simple frontend UI
+############################################################
+@app.get("/dashboard")
+def dashboard():
+    return """
+    <html>
+    <head>
+        <title>Mira V6 Dashboard</title>
+        <style>
+            body { font-family: Arial; padding: 20px; background: #111; color: #fff; }
+            input, button { padding: 10px; font-size: 18px; margin: 5px; }
+            .box { background: #222; padding: 20px; border-radius: 10px; width: 60%; }
+        </style>
+    </head>
+    <body>
+        <h1>Mira V6 Ultra Human – Test Panel</h1>
+        <div class="box">
+            <h3>Send Text</h3>
+            <input id="msg" style="width:70%" placeholder="Type message...">
+            <button onclick="sendMsg()">Send</button>
+            <p><b>Reply:</b></p>
+            <pre id="reply" style="white-space:pre-wrap;"></pre>
+
+            <h3>Generate Voice</h3>
+            <button onclick="voiceTest()">Generate Voice</button>
+            <audio id="voice" controls style="margin-top:10px;"></audio>
+
+            <h3>Generate Image</h3>
+            <button onclick="imageTest()">Generate Image</button>
+            <img id="img" width="300" style="margin-top:10px;">
+        </div>
+
+        <script>
+            async function sendMsg() {
+                let message = document.getElementById("msg").value;
+                let res = await fetch("/chat", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({message})
+                });
+                let data = await res.json();
+                document.getElementById("reply").innerText = data.reply;
+            }
+
+            async function voiceTest() {
+                let res = await fetch("/voice_test?text=hello+from+Mira");
+                let data = await res.json();
+                if (data.voice_url) {
+                    document.getElementById("voice").src = data.voice_url;
+                }
+            }
+
+            async function imageTest() {
+                let res = await fetch("/image_test?prompt=cute+indian+girl");
+                let data = await res.json();
+                if (data.image_url) {
+                    document.getElementById("img").src = data.image_url;
+                }
+            }
+        </script>
+    </body>
+    </html>
+    """
