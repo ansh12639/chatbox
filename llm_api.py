@@ -1,331 +1,230 @@
-# =====================================================================
-# MIRA V2 — FREE LLM + FREE IMAGE + ELEVENLABS VOICE
-# WhatsApp + Telegram + Memory + RAG + Personality
-# =====================================================================
+# ================================
+# MIRA V3 — Free Edition
+# Groq LLM + HF Voice + HF Images
+# ================================
 
 import os
 import json
 import random
-import time
 import base64
-import requests
-
+import time
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import Response
+from huggingface_hub import InferenceClient
+from groq import Groq
+from pydub import AudioSegment
+import requests
 
-# =====================================================================
-# ENV VARIABLES
-# =====================================================================
+# ---------------------------------
+# Load Keys
+# ---------------------------------
+HF_KEY = os.getenv("HF_API_KEY")
+GROQ_KEY = os.getenv("GROQ_API_KEY")
 
-HF_API_KEY = os.getenv("HF_API_KEY")
-ELEVEN_API_KEY = os.getenv("ELEVEN_API_KEY")
-ELEVEN_VOICE_ID = os.getenv("ELEVEN_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
+hf_client = InferenceClient(token=HF_KEY)
+groq_client = Groq(api_key=GROQ_KEY)
 
-RAILWAY_PUBLIC_URL = os.getenv("RAILWAY_PUBLIC_URL", "").rstrip("/")
-
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-
-TWILIO_SID = os.getenv("TWILIO_SID")
-TWILIO_AUTH = os.getenv("TWILIO_AUTH")
-TWILIO_NUMBER = "whatsapp:+14155238886"
-
-# =====================================================================
-# FASTAPI APP + STATIC
-# =====================================================================
-
+# ---------------------------------
+# FastAPI + Static
+# ---------------------------------
 app = FastAPI()
-
 STATIC_DIR = "static"
 os.makedirs(STATIC_DIR, exist_ok=True)
-
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 def static_url(filename):
-    return f"{RAILWAY_PUBLIC_URL}/static/{filename}"
+    base = os.getenv("RAILWAY_PUBLIC_URL", "").rstrip("/")
+    return f"{base}/static/{filename}"
 
-# =====================================================================
-# SAFETY + PERSONALITY + MOOD ENGINE
-# =====================================================================
-
-SAFETY_RULES = (
-    "You cannot be romantic, sexual, intimate or claim to be a partner. "
-    "No love, no relationship roleplay, no flirting. "
-    "You speak naturally but remain an AI. "
+# ---------------------------------
+# Personality + Safety
+# ---------------------------------
+SAFETY = (
+    "You must NOT be romantic, explicit, sexual. "
+    "You are Mira, soft playful, poetic, aesthetic. "
 )
 
-MIRA_PERSONALITY = (
-    "Your name is Mira. Soft, dreamy, warm Indian-English tone. "
-    "Short sentences. Gentle teasing. Atmospheric. Poetic. "
-    "Do NOT introduce your name unless asked directly. "
+PERSONALITY = (
+    "You speak short, warm, Indian-English tone. "
+    "Style: dreamy, soft teasing, poetic visuals. "
 )
 
-MOOD_STYLES = [
-    "soft as monsoon clouds ☁️",
-    "warm like morning chai 🌤️",
-    "quiet and thoughtful 🌫️",
-    "playfully curious 🙂",
-    "minimal and aesthetic ✨",
+MOODS = [
+    "soft like early morning fog",
+    "warm as afternoon chai",
+    "gentle like drifting clouds",
+    "quiet and thoughtful",
 ]
 
-def pick_mood():
-    return random.choice(MOOD_STYLES)
+def mood():
+    return random.choice(MOODS)
 
-# =====================================================================
-# SHORT-TERM & LONG-TERM MEMORY
-# =====================================================================
-
-EMOTIONAL_MEMORY = []
-
-def remember_emotion(text):
-    text = text.lower()
-    triggers = {
-        "tired": "user often feels tired",
-        "sad": "user feels low sometimes",
-        "stressed": "user gets stressed",
-        "lonely": "user appreciates gentle presence",
-    }
-    for word, meaning in triggers.items():
-        if word in text:
-            EMOTIONAL_MEMORY.append(meaning)
-    if len(EMOTIONAL_MEMORY) > 10:
-        EMOTIONAL_MEMORY.pop(0)
-
-def emotional_context():
-    if not EMOTIONAL_MEMORY:
-        return "No emotional patterns yet."
-    return ", ".join(EMOTIONAL_MEMORY)
-
-# Long-term memory
+# ---------------------------------
+# Memory System
+# ---------------------------------
 MEMORY_FILE = "memory.json"
-
 if not os.path.exists(MEMORY_FILE):
     with open(MEMORY_FILE, "w") as f:
-        json.dump({
-            "user_name": None,
-            "preferences": [],
-            "emotions": [],
-            "topics": []
-        }, f, indent=4)
+        json.dump({"name": None, "emotions": [], "topics": []}, f)
 
-def load_memory():
-    with open(MEMORY_FILE, "r") as f:
+def load_mem():
+    with open(MEMORY_FILE) as f:
         return json.load(f)
 
-def save_memory(data):
+def save_mem(data):
     with open(MEMORY_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
-def update_long_memory(text):
-    mem = load_memory()
-    t = text.lower()
-
-    if "my name is" in t:
-        name = t.split("my name is")[-1].split()[0]
-        mem["user_name"] = name.capitalize()
-
-    if "i like" in t:
-        mem["preferences"].append(t.split("i like")[-1].strip())
-
-    emo_words = ["sad", "tired", "angry", "lonely", "low"]
-    for w in emo_words:
-        if w in t:
-            mem["emotions"].append(f"user feels {w}")
-
-    save_memory(mem)
-
-def memory_context():
-    mem = load_memory()
-    return (
-        f"User name: {mem.get('user_name')}. "
-        f"Preferences: {', '.join(mem.get('preferences', []))}. "
-        f"Emotional trends: {', '.join(mem.get('emotions', []))}. "
-    )
-
-# =====================================================================
-# FREE LLM — HuggingFace Inference API (Mistral or similar)
-# =====================================================================
-
-def free_llm(prompt):
-    url = "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1"
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-
-    data = {"inputs": prompt}
-
-    r = requests.post(url, headers=headers, json=data)
-    try:
-        return r.json()[0]["generated_text"]
-    except:
-        return "Mira can't think right now, try again."
-
-# =====================================================================
-# FREE IMAGE — HuggingFace (Stable Diffusion)
-# =====================================================================
-
-def generate_image(filename="mira_img.png"):
-    url = "https://api-inference.huggingface.co/models/stabilityai/sdxl-turbo"
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {"inputs": "dreamy aesthetic soft-focus Indian pastel art"}
-
-    r = requests.post(url, headers=headers, json=payload)
-
-    if r.status_code != 200:
-        print("IMAGE ERROR:", r.text)
-        return None
-
-    img_data = base64.b64decode(r.json()[0]["image"])
-    path = f"static/{filename}"
-
-    with open(path, "wb") as f:
-        f.write(img_data)
-
-    return path
-
-# =====================================================================
-# ELEVENLABS VOICE (FREE)
-# =====================================================================
-
-def generate_voice(text, filename="mira_voice.mp3"):
-
-    try:
-        url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE_ID}"
-        headers = {
-            "xi-api-key": ELEVEN_API_KEY,
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "text": text,
-            "model_id": "eleven_multilingual_v2",
-            "voice_settings": {"stability": 0.4, "similarity_boost": 0.85}
-        }
-
-        r = requests.post(url, json=payload, headers=headers)
-
-        if r.status_code != 200:
-            print("ELEVEN ERROR:", r.text)
-            return None
-
-        path = f"static/{filename}"
-        with open(path, "wb") as f:
-            f.write(r.content)
-
-        return path
-
-    except Exception as e:
-        print("VOICE ERROR:", e)
-        return None
-
-# =====================================================================
-# CENTRAL CHAT PIPELINE (Mira’s brain)
-# =====================================================================
-
-SHORT_MEMORY = []
-
-def chat_pipeline(user_msg):
-
-    remember_emotion(user_msg)
-    update_long_memory(user_msg)
-
+# ---------------------------------
+# Groq LLM Chat
+# ---------------------------------
+def ask_groq(msg, memory_text):
     prompt = (
-        SAFETY_RULES
-        + MIRA_PERSONALITY
-        + f"Mood: {pick_mood()}. "
-        + f"Emotional memory: {emotional_context()}. "
-        + f"Long-term memory: {memory_context()}. "
-        + f"Conversation so far: {SHORT_MEMORY[-5:]}. "
-        + f"User says: {user_msg}"
+        SAFETY
+        + PERSONALITY
+        + f"\nMood: {mood()}\nMemory: {memory_text}\nUser: {msg}\nMira:"
     )
 
-    reply = free_llm(prompt)
-    SHORT_MEMORY.append(reply)
+    response = groq_client.chat.completions.create(
+        model="mixtral-8x7b-32768",
+        messages=[{"role": "user", "content": prompt}]
+    )
+    return response.choices[0].message.content.strip()
+
+# ---------------------------------
+# Voice Generation - HuggingFace Bark Small
+# ---------------------------------
+def make_voice(text):
+    output = hf_client.text_to_speech(
+        model="suno/bark-small",
+        text=text
+    )
+    ogg_path = "static/mira_voice.ogg"
+    with open(ogg_path, "wb") as f:
+        f.write(output)
+    return ogg_path
+
+# ---------------------------------
+# Image Generation - SDXL Lite
+# ---------------------------------
+def make_image():
+    result = hf_client.text_to_image(
+        model="stabilityai/sdxl-turbo",
+        prompt="dreamy soft aesthetic golden clouds, warm cinematic light"
+    )
+    img_path = "static/mira_img.png"
+    result.save(img_path)
+    return img_path
+
+# ---------------------------------
+# Central Pipeline
+# ---------------------------------
+def pipeline(user_msg):
+    mem = load_mem()
+
+    if "my name is" in user_msg.lower():
+        name = user_msg.split("my name is")[-1].strip().split(" ")[0]
+        mem["name"] = name.capitalize()
+        save_mem(mem)
+
+    memory_text = json.dumps(mem)
+
+    reply = ask_groq(user_msg, memory_text)
 
     return reply
 
-# =====================================================================
-# WHATSAPP (Twilio)
-# =====================================================================
-
+# ---------------------------------
+# WhatsApp Webhook
+# ---------------------------------
 from twilio.rest import Client
-
+TWILIO_SID = os.getenv("TWILIO_SID")
+TWILIO_AUTH = os.getenv("TWILIO_AUTH")
 twilio_client = Client(TWILIO_SID, TWILIO_AUTH)
 
+TWILIO_NUMBER = "whatsapp:+14155238886"
+
 @app.post("/whatsapp_webhook")
-async def whatsapp_webhook(request: Request):
-
+async def wa(request: Request):
     form = await request.form()
-
     msg = form.get("Body", "")
-    num = form.get("From", "")
+    user = form.get("From", "")
 
-    reply = chat_pipeline(msg)
+    reply = pipeline(msg)
 
-    voice_path = generate_voice(reply, "wa_voice.mp3")
-
-    if voice_path:
+    # 30% chance send voice
+    if random.random() < 0.3:
+        voice = make_voice(reply)
         twilio_client.messages.create(
             from_=TWILIO_NUMBER,
-            to=num,
-            media_url=static_url("wa_voice.mp3")
+            to=user,
+            media_url=static_url("mira_voice.ogg")
+        )
+        return "OK"
+
+    # 10% chance send image
+    if random.random() < 0.1:
+        img = make_image()
+        twilio_client.messages.create(
+            from_=TWILIO_NUMBER,
+            to=user,
+            media_url=static_url("mira_img.png"),
+            body=reply
         )
         return "OK"
 
     twilio_client.messages.create(
         from_=TWILIO_NUMBER,
-        to=num,
+        to=user,
         body=reply
     )
-
     return "OK"
 
-# =====================================================================
-# TELEGRAM BOT
-# =====================================================================
-
-TG_SEND_TEXT = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-TG_SEND_VOICE = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVoice"
-
+# ---------------------------------
+# Telegram Webhook
+# ---------------------------------
 @app.post("/telegram_webhook")
-async def telegram_webhook(request: Request):
+async def tg(request: Request):
     data = await request.json()
-
     if "message" not in data:
         return {"ok": True}
 
-    chat_id = data["message"]["chat"]["id"]
     msg = data["message"].get("text", "")
+    chat = data["message"]["chat"]["id"]
 
-    reply = chat_pipeline(msg)
-    voice_path = generate_voice(reply, "tg_voice.mp3")
+    reply = pipeline(msg)
 
-    # Voice first
-    if voice_path:
-        with open("static/tg_voice.mp3", "rb") as audio:
+    # Voice sometimes
+    if random.random() < 0.3:
+        path = make_voice(reply)
+        with open(path, "rb") as f:
             requests.post(
-                TG_SEND_VOICE,
-                data={"chat_id": chat_id},
-                files={"voice": audio}
+                f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendVoice",
+                data={"chat_id": chat},
+                files={"voice": f}
             )
-        return {"ok": True}
+            return {"ok": True}
 
-    # Text fallback
+    # Image sometimes
+    if random.random() < 0.1:
+        img = make_image()
+        with open(img, "rb") as f:
+            requests.post(
+                f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendPhoto",
+                data={"chat_id": chat},
+                files={"photo": f}
+            )
+            return {"ok": True}
+
+    # Fallback text
     requests.post(
-        TG_SEND_TEXT,
-        json={"chat_id": chat_id, "text": reply}
+        f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
+        json={"chat_id": chat, "text": reply}
     )
-
     return {"ok": True}
 
-# =====================================================================
-# HEALTH + TEST CHAT
-# =====================================================================
-
+# ---------------------------------
+# Home
+# ---------------------------------
 @app.get("/")
 def home():
-    return {"bot": "Mira V2", "status": "running"}
-
-@app.post("/chat")
-async def test_chat(req: Request):
-    data = await req.json()
-    msg = data.get("message", "")
-    return {"reply": chat_pipeline(msg)}
+    return {"status": "OK", "bot": "Mira V3 Free"}
