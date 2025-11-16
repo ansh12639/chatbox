@@ -86,10 +86,11 @@ def ask_groq(msg, memory_text):
     )
 
     response = groq_client.chat.completions.create(
-        model="mixtral-8x7b-32768",
+        model="llama3-8b-8192",
         messages=[{"role": "user", "content": prompt}]
     )
     return response.choices[0].message.content.strip()
+
 
 # ---------------------------------
 # Voice Generation - HuggingFace Bark Small
