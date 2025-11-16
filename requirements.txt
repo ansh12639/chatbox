@@ -1,6 +1,5 @@
 fastapi
 uvicorn
-openai
 python-multipart
 requests
 twilio
