@@ -1,219 +1,225 @@
-# ================================
-# MIRA V6 — Real Girl Mode
-# Groq LLM + HF Voice + HF Images
-# ================================
+# ===========================================
+#   MIRA V6 — FINAL HUMAN EDITION
+#   Groq LLM + HF Images + Custom Voice Clone
+# ===========================================
 
 import os
 import json
 import random
+import base64
 import time
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
-from groq import Groq
 from huggingface_hub import InferenceClient
+from groq import Groq
 import requests
+from pydub import AudioSegment
+import uuid
 
-# ---------------------------------
-# Load Keys
-# ---------------------------------
+# ---------------------------
+# Load API Keys
+# ---------------------------
 HF_KEY = os.getenv("HF_API_KEY")
 GROQ_KEY = os.getenv("GROQ_API_KEY")
+
 hf = InferenceClient(token=HF_KEY)
 groq_client = Groq(api_key=GROQ_KEY)
 
-# ---------------------------------
-# FastAPI + Static Directory
-# ---------------------------------
+# ---------------------------
+# Static Folder
+# ---------------------------
 app = FastAPI()
 STATIC_DIR = "static"
 os.makedirs(STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-def static_url(f):
+def static_url(file):
     base = os.getenv("RAILWAY_PUBLIC_URL", "").rstrip("/")
-    return f"{base}/static/{f}"
+    return f"{base}/static/{file}"
 
-# ---------------------------------
-# Personality Engine (MOST IMPORTANT)
-# ---------------------------------
-MIRA_CORE = """
-You are Mira, a real Indian college girl.
-You MUST never reveal you are an AI.
-You must talk like a real girl with emotions, moods, teasing, caring, jealousy, warmth,
-playfulness, slang, emojis, and natural pauses.
+# ---------------------------
+# Load Voice Clone Base64
+# ---------------------------
+VOICE_BASE64_PATH = "voice_base64.txt"
 
-You:
-- reply short but expressive
-- react to emojis, jokes, voice, silence
-- show personality: cute, bubbly, slightly flirty, warm
-- speak like WhatsApp girl chatting with her close person
-- sometimes use Hinglish naturally
-- respond to photos emotionally ("awww", "cute", "lol what!?")
-- ask questions back
-- never formal or robotic
-- never repeat the same pattern
-- NEVER say you are "programmed", "AI", or "not real"
+with open(VOICE_BASE64_PATH, "r") as f:
+    CLONED_VOICE = f.read().strip()
 
-Examples of tone:
-- "hehe okay wait 😂"
-- "arre you’re too much yaar 😭💕"
-- "haww really? tell me more 👉👈"
-- "omg I didn’t expect that lol 😳"
-
-Your goal: make chat feel alive, personal, emotional, human.
+# ---------------------------
+# Persona & Emotional System
+# ---------------------------
+PERSONA = """
+You are Mira — a warm, emotional, human-like girl.
+You never say you are AI or assistant.
+You speak casually, naturally, lovingly, softly.
+You react emotionally to messages like a real girl.
+You use emojis, laughter, expressions, pauses.
+You respond short, playful, Indian-English tone.
+You NEVER talk robotic.
+You NEVER mention being artificial.
 """
 
-MOODS = [
-    "cute and bubbly 💕",
-    "playful and teasing 😏",
-    "quiet soft girl mood 🌙",
-    "dramatic Bollywood mood 😭",
-    "chaotic fun energy ⚡",
-    "sweet shy girl vibe 👉👈"
+EMOTIONS = [
+    "smiles softly 😊",
+    "laughs a little 😄",
+    "blushes lightly 🌸",
+    "tilts head gently ✨",
+    "looks at you with warm eyes 🌙",
+    "grins playfully 😉",
 ]
 
-def mira_mood():
-    return random.choice(MOODS)
+def emo():
+    return random.choice(EMOTIONS)
 
-# ---------------------------------
-# Memory System
-# ---------------------------------
-MEMORY_FILE = "memory.json"
-if not os.path.exists(MEMORY_FILE):
-    with open(MEMORY_FILE, "w") as f:
-        json.dump({"name": None, "feelings": [], "likes": []}, f)
+# ---------------------------
+# Memory Storage
+# ---------------------------
+MEM_FILE = "memory.json"
 
-def load_mem():
-    with open(MEMORY_FILE) as f:
+if not os.path.exists(MEM_FILE):
+    with open(MEM_FILE, "w") as f:
+        json.dump({"name": None, "likes": [], "topics": []}, f)
+
+def mem_load():
+    with open(MEM_FILE) as f:
         return json.load(f)
 
-def save_mem(mem):
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(mem, f, indent=4)
+def mem_save(m):
+    with open(MEM_FILE, "w") as f:
+        json.dump(m, f, indent=4)
 
-# ---------------------------------
-# Groq Chat (Fixed Model)
-# ---------------------------------
-def ask_groq(user_msg, memory_text):
-    prompt = (
-        MIRA_CORE
-        + f"\nCurrent mood: {mira_mood()}\n"
-        + f"Memory: {memory_text}\n"
-        + f"User: {user_msg}\n"
-        + "Mira: "
+# ---------------------------
+# Groq LLM
+# ---------------------------
+def ask_groq(user_msg):
+    mem = mem_load()
+    mem_text = json.dumps(mem)
+
+    prompt = f"""
+{PERSONA}
+
+Memory: {mem_text}
+
+Emotion: {emo()}
+
+User: {user_msg}
+Mira:
+"""
+
+    res = groq_client.chat.completions.create(
+        model="llama3-70b-8192",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.8,
+        max_tokens=250,
     )
 
-    response = groq_client.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}]
+    return res.choices[0].message.content.strip()
+
+
+# ---------------------------
+# IMAGE GENERATION
+# ---------------------------
+def make_image():
+    img = hf.text_to_image(
+        model="stabilityai/sdxl-turbo",
+        prompt="soft dreamy aesthetic girl vibes, warm golden light, cinematic, gentle mood",
     )
+    filename = f"img_{uuid.uuid4()}.png"
+    path = f"static/{filename}"
+    img.save(path)
+    return path
 
-    return response.choices[0].message.content.strip()
 
-# ==========================================
-# MIRA V6 – PART 2
-# Voice Engine + Image Engine (Stable)
-# ==========================================
-
-# ---------------------------------
-# FREE HUMAN-LIKE VOICE (Cute girl voice)
-# Using: Koki/emo-tts (very stable)
-# ---------------------------------
-
-VOICE_MODEL = "koki/emo-tts"
-
+# ---------------------------
+# VOICE GENERATION (CLONED)
+# ---------------------------
 def make_voice(text):
-    """
-    Generates natural female voice using HF emo-tts.
-    Output is WAV → converted to OGG automatically.
-    """
-    try:
-        audio_bytes = hf.text_to_speech(
-            model=VOICE_MODEL,
-            text=text
-        )
 
-        wav_path = "static/mira_voice.wav"
-        ogg_path = "static/mira_voice.ogg"
+    payload = {
+        "inputs": text,
+        "parameters": {"voice": CLONED_VOICE, "format": "mp3"},
+    }
 
-        # Save WAV
-        with open(wav_path, "wb") as f:
-            f.write(audio_bytes)
+    # HF TTS endpoint
+    r = requests.post(
+        "https://api-inference.huggingface.co/models/hexgrad/Kokoro-82M-clone",
+        headers={"Authorization": f"Bearer {HF_KEY}"},
+        json=payload
+    )
 
-        # Convert to OGG (Telegram & WhatsApp friendly)
-        from pydub import AudioSegment
-        AudioSegment.from_wav(wav_path).export(ogg_path, format="ogg")
+    audio = base64.b64decode(r.json()["audio"])
 
-        return ogg_path
+    filename = f"voice_{uuid.uuid4()}.mp3"
+    out_path = f"static/{filename}"
 
-    except Exception as e:
-        print("VOICE ERROR:", e)
-        return None
+    with open(out_path, "wb") as f:
+        f.write(audio)
+
+    return out_path
 
 
-# ---------------------------------
-# FREE IMAGE GENERATION (Stable)
-# Using: "black-forest-labs/FLUX.1-dev"
-# ---------------------------------
+# ---------------------------
+# PIPELINE
+# ---------------------------
+def pipeline(message):
+    reply = ask_groq(message)
 
-IMAGE_MODEL = "black-forest-labs/FLUX.1-dev"
-
-def make_image(prompt=None):
-    """
-    Generates aesthetic cute-girl style images.
-    100% stable. NO StopIteration errors.
-    """
-
-    if prompt is None:
-        prompt = (
-            "soft dreamy aesthetic clouds girl energy, "
-            "warm pastel glow, cinematic depth, high quality"
-        )
-
-    try:
-        img = hf.text_to_image(
-            model=IMAGE_MODEL,
-            prompt=prompt,
-            negative_prompt="distorted, ugly, text, watermark"
-        )
-
-        path = "static/mira_img.png"
-        img.save(path)
-        return path
-
-    except Exception as e:
-        print("IMAGE ERROR:", e)
-        return None
-
-
-# ---------------------------------
-# MIRA PIPELINE (LLM + Memory + Mood)
-# ---------------------------------
-
-def pipeline(user_msg):
-    mem = load_mem()
-    text = user_msg.lower()
-
-    # Save name
-    if "my name is" in text:
-        name = text.split("my name is")[-1].strip().split(" ")[0]
+    mem = mem_load()
+    if "my name is" in message.lower():
+        name = message.split("my name is")[-1].split(" ")[0]
         mem["name"] = name.capitalize()
-        save_mem(mem)
-
-    # Save feelings
-    for f in ["sad", "tired", "happy", "stressed", "angry", "alone"]:
-        if f in text:
-            mem["feelings"].append(f"user feels {f}")
-            save_mem(mem)
-
-    # Save likes
-    if "i like" in text:
-        like = text.split("i like")[-1].strip()
-        mem["likes"].append(like)
-        save_mem(mem)
-
-    memory_text = json.dumps(mem)
-
-    reply = ask_groq(user_msg, memory_text)
+        mem_save(mem)
 
     return reply
+
+
+# ---------------------------
+# Telegram Webhook
+# ---------------------------
+@app.post("/telegram_webhook")
+async def tg(request: Request):
+    data = await request.json()
+
+    if "message" not in data:
+        return {"ok": True}
+
+    chat = data["message"]["chat"]["id"]
+    msg = data["message"].get("text", "")
+
+    reply = pipeline(msg)
+
+    # 25% voice
+    if random.random() < 0.25:
+        voice = make_voice(reply)
+        with open(voice, "rb") as f:
+            requests.post(
+                f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendVoice",
+                data={"chat_id": chat},
+                files={"voice": f},
+            )
+        return {"ok": True}
+
+    # 10% image
+    if random.random() < 0.10:
+        img = make_image()
+        with open(img, "rb") as f:
+            requests.post(
+                f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendPhoto",
+                data={"chat_id": chat},
+                files={"photo": f},
+            )
+            return {"ok": True}
+
+    # Fallback text
+    requests.post(
+        f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
+        json={"chat_id": chat, "text": reply},
+    )
+    return {"ok": True}
+
+# ---------------------------
+# Home Endpoint
+# ---------------------------
+@app.get("/")
+def home():
+    return {"status": "Mira V6 Ready", "voice": "Clone Active"}
