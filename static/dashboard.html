@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mira Dashboard</title>
+    <style>
+      :root {
+        --bg: #0f0f10;
+        --card: #161616;
+        --muted: #bfbfbf;
+        --accent: #00aaff;
+      }
+      html,body { height:100%; margin:0; }
+      body {
+        background: var(--bg);
+        color: #fff;
+        font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial;
+        padding: 24px;
+        -webkit-font-smoothing:antialiased;
+      }
+      .container {
+        max-width: 980px;
+        margin: 0 auto;
+      }
+      h1 { margin: 0 0 18px 0; font-weight:600; }
+      .card {
+        background: var(--card);
+        border-radius: 12px;
+        padding: 20px;
+        box-shadow: 0 6px 24px rgba(0,0,0,0.6);
+      }
+      label { display:block; margin-bottom:8px; color:var(--muted); font-size:14px; }
+      .row { display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
+      input[type="text"] {
+        flex:1;
+        min-width: 160px;
+        padding:10px 12px;
+        border-radius:8px;
+        border:1px solid rgba(255,255,255,0.06);
+        background: rgba(255,255,255,0.02);
+        color:inherit;
+        font-size:16px;
+      }
+      button {
+        padding:10px 14px;
+        border-radius:8px;
+        border: none;
+        cursor: pointer;
+        background: linear-gradient(90deg,var(--accent),#006fbe);
+        color: #fff;
+        font-weight:600;
+        font-size:15px;
+      }
+      button[disabled] { opacity: 0.6; cursor: not-allowed; }
+      pre#reply {
+        background: rgba(0,0,0,0.25);
+        padding:12px;
+        border-radius:8px;
+        white-space: pre-wrap;
+        color: #e6eef6;
+        min-height: 64px;
+      }
+      .media {
+        display:flex;
+        gap:16px;
+        align-items:flex-start;
+        margin-top:8px;
+        flex-wrap:wrap;
+      }
+      img#img {
+        border-radius:8px;
+        max-width:100%;
+        height:auto;
+        background: #222;
+      }
+      audio { width:100%; }
+      .muted { color:var(--muted); font-size:13px; margin-top:6px; }
+    </style>
+  </head>
+
+  <body>
+    <div class="container">
+      <h1>Mira V6 Ultra Human – Test Panel</h1>
+
+      <div class="card" role="region" aria-label="Mira test panel">
+        <!-- Send Text -->
+        <section aria-labelledby="send-text">
+          <h2 id="send-text" style="font-size:18px; margin:0 0 10px 0;">Send Text</h2>
+          <label for="msg">Type message</label>
+          <div class="row">
+            <input id="msg" type="text" placeholder="Type message..." aria-label="Message input" />
+            <button id="sendBtn">Send</button>
+          </div>
+          <p class="muted"><strong>Reply:</strong></p>
+          <pre id="reply" aria-live="polite">—</pre>
+        </section>
+
+        <hr style="border:none; height:1px; background:#222; margin:18px 0;">
+
+        <!-- Generate Voice -->
+        <section aria-labelledby="voice-test">
+          <h2 id="voice-test" style="font-size:18px; margin:0 0 10px 0;">Generate Voice</h2>
+          <div class="row">
+            <button id="voiceBtn">Generate Voice</button>
+          </div>
+          <div class="media" style="flex-direction:column;">
+            <audio id="voice" controls preload="none" aria-label="Generated voice"></audio>
+            <div id="voiceStatus" class="muted">No voice generated yet.</div>
+          </div>
+        </section>
+
+        <hr style="border:none; height:1px; background:#222; margin:18px 0;">
+
+        <!-- Generate Image -->
+        <section aria-labelledby="image-test">
+          <h2 id="image-test" style="font-size:18px; margin:0 0 10px 0;">Generate Image</h2>
+          <label for="imgPrompt">Prompt</label>
+          <div class="row">
+            <input id="imgPrompt" type="text" placeholder="e.g. cute indian girl, portrait, studio lighting" />
+            <button id="imageBtn">Generate Image</button>
+          </div>
+          <div class="media">
+            <img id="img" alt="Generated result" width="300" />
+            <div id="imgStatus" class="muted">No image yet.</div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      // helpers
+      const $ = id => document.getElementById(id);
+      const setReply = text => { $('reply').innerText = text ?? '—'; };
+
+      // Attach events
+      $('sendBtn').addEventListener('click', sendMsg);
+      $('voiceBtn').addEventListener('click', voiceTest);
+      $('imageBtn').addEventListener('click', imageTest);
+
+      async function sendMsg(){
+        const btn = $('sendBtn');
+        const message = $('msg').value?.trim();
+        if(!message){
+          setReply('Please type a message first.');
+          return;
+        }
+        btn.disabled = true;
+        setReply('Sending…');
+
+        try {
+          const res = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+            body: JSON.stringify({ message })
+          });
+          if (!res.ok) throw new Error(`Server returned ${res.status}`);
+          const data = await res.json();
+          // if server returns { reply } or { message }...
+          const reply = data?.reply ?? data?.message ?? JSON.stringify(data, null, 2);
+          setReply(reply);
+        } catch (err) {
+          setReply('Error: ' + err.message);
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      async function voiceTest(){
+        const btn = $('voiceBtn');
+        const status = $('voiceStatus');
+        btn.disabled = true;
+        status.innerText = 'Generating voice…';
+
+        try {
+          // encode text properly
+          const text = encodeURIComponent('hello from Mira');
+          // try to accept JSON response with voice_url, or binary audio
+          const res = await fetch(`/voice_test?text=${text}`, {
+            headers: { 'Accept': 'application/json, audio/*' }
+          });
+
+          if (!res.ok) throw new Error(`Server returned ${res.status}`);
+
+          const contentType = res.headers.get('content-type') || '';
+
+          if (contentType.includes('application/json')) {
+            const data = await res.json();
+            if (data.voice_url) {
+              $('voice').src = data.voice_url;
+              status.innerText = 'Voice available at URL.';
+            } else if (data.audio_base64) {
+              // optional: server may return base64 audio
+              $('voice').src = `data:audio/mpeg;base64,${data.audio_base64}`;
+              status.innerText = 'Voice loaded (base64).';
+            } else {
+              status.innerText = 'JSON response did not include voice_url.';
+            }
+          } else if (contentType.startsWith('audio/') || contentType.includes('octet-stream')) {
+            // server returned raw audio blob
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            $('voice').src = url;
+            status.innerText = 'Voice loaded (blob).';
+          } else {
+            // fallback: try to parse text
+            const textBody = await res.text();
+            status.innerText = 'Received unknown response: ' + textBody.slice(0, 200);
+          }
+        } catch (err) {
+          status.innerText = 'Error: ' + err.message;
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      async function imageTest(){
+        const btn = $('imageBtn');
+        const status = $('imgStatus');
+        const prompt = $('imgPrompt').value?.trim() || 'cute indian girl';
+        btn.disabled = true;
+        status.innerText = 'Generating image…';
+
+        try {
+          const q = new URLSearchParams({ prompt });
+          const res = await fetch('/image_test?' + q.toString(), {
+            headers: { 'Accept': 'application/json,image/*' }
+          });
+
+          if (!res.ok) throw new Error(`Server returned ${res.status}`);
+
+          const contentType = res.headers.get('content-type') || '';
+
+          if (contentType.includes('application/json')) {
+            const data = await res.json();
+            if (data.image_url) {
+              $('img').src = data.image_url;
+              status.innerText = 'Image available at URL.';
+            } else if (data.image_base64) {
+              $('img').src = `data:image/png;base64,${data.image_base64}`;
+              status.innerText = 'Image loaded (base64).';
+            } else {
+              status.innerText = 'JSON response did not include image_url.';
+            }
+          } else if (contentType.startsWith('image/')) {
+            // server returned raw image blob
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            $('img').src = url;
+            status.innerText = 'Image loaded (blob).';
+          } else {
+            const textBody = await res.text();
+            status.innerText = 'Unknown response: ' + textBody.slice(0, 200);
+          }
+        } catch (err) {
+          status.innerText = 'Error: ' + err.message;
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      // Optional: send on Enter in message input
+      $('msg').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') sendMsg();
+      });
+      // Optional: populate sample prompt
+      $('imgPrompt').value = 'cute indian girl, portrait, studio lighting';
+    </script>
+  </body>
+</html>

@@ -1,9 +1,6 @@
 fastapi
 uvicorn
 requests
-twilio
 python-multipart
-huggingface_hub
-pydub
-Pillow
 groq
+twilio
