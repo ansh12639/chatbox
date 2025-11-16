@@ -5,7 +5,6 @@
 import os
 import json
 import random
-import time
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 import requests
@@ -40,7 +39,7 @@ def static_url(file):
 
 
 ###########################################################
-# MEMORY SYSTEM
+# MEMORY
 ###########################################################
 
 MEMORY_FILE = "rag_data/memory.json"
@@ -59,13 +58,14 @@ def save_memory(mem):
 
 
 ###########################################################
-# IMAGE GENERATION (Flux)
+# IMAGE GENERATION (Fixed Flux endpoint)
 ###########################################################
 def generate_image(prompt):
     try:
         r = requests.post(
-            "https://api.fal.ai/v1/run/flux-pro",
-            headers={"Authorization": f"Key {FAL_KEY}"},
+            "https://api.fal.ai/v1/run/flux/pro",
+            headers={"Authorization": f"Key {FAL_KEY}",
+                     "Content-Type": "application/json"},
             json={"prompt": prompt},
         )
         data = r.json()
@@ -87,24 +87,17 @@ def generate_image(prompt):
 
 
 ###########################################################
-# VOICE GENERATION (USING YOUR MP3 DIRECTLY)
+# VOICE GENERATION (Stable Indian TTS)
 ###########################################################
 def generate_voice(text):
     try:
-        # mimic voice by merging your source audio + text speech
-        # (simple stable technique)
-        url = "https://api-inference.huggingface.co/models/facebook/mms-tts-eng"
+        url = "https://api-inference.huggingface.co/models/facebook/mms-tts-hin"
         headers = {"Authorization": f"Bearer {HF_API_KEY}"}
         res = requests.post(url, headers=headers, json={"inputs": text})
 
-        # save TTS from model
-        tts_file = "static/tmp_tts.wav"
-        with open(tts_file, "wb") as f:
-            f.write(res.content)
-
-        # Final voice file (just TTS for stability)
-        final = GENERATED_VOICE_FILE
-        with open(final, "wb") as f:
+        # Save as .wav
+        tts_path = GENERATED_VOICE_FILE
+        with open(tts_path, "wb") as f:
             f.write(res.content)
 
         return static_url("mira_voice.ogg")
@@ -116,7 +109,7 @@ def generate_voice(text):
 
 
 ###########################################################
-# MAIN CHAT (GROQ FIXED MODEL)
+# MAIN CHAT - FIXED GROQ MODEL
 ###########################################################
 def ask_mira(user_msg, memory):
 
@@ -131,11 +124,11 @@ Memory:
 
 User: {user_msg}
 
-Reply like a real Indian girlfriend: cute, warm, short, emojis.
+Reply like a real Indian girlfriend: cute, soft, Hinglish + emojis.
 """
 
     response = groq_client.chat.completions.create(
-        model="llama-3.1-70b-versatile",
+        model="llama3-70b",
         messages=[{"role": "user", "content": prompt}],
     )
 
@@ -148,7 +141,6 @@ Reply like a real Indian girlfriend: cute, warm, short, emojis.
 def pipeline(msg):
     mem = load_memory()
 
-    # Store name
     if "my name is" in msg.lower():
         mem["name"] = msg.split("my name is")[-1].strip().split(" ")[0]
 
@@ -170,7 +162,6 @@ async def chat_api(request: Request):
     msg = data.get("message", "")
     reply = pipeline(msg)
     return {"reply": reply}
-
 
 
 @app.get("/voice_test")
@@ -203,7 +194,6 @@ async def telegram(request: Request):
 
     reply = pipeline(msg)
 
-    # Send text
     requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
         json={"chat_id": chat_id, "text": reply}
