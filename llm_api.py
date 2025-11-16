@@ -165,11 +165,12 @@ def pipeline(msg):
 ###########################################################
 
 @app.post("/chat")
-async def chat(request: Request):
-    body = await request.json()
-    msg = body.get("message", "")
+async def chat_api(request: Request):
+    data = await request.json()
+    msg = data.get("message", "")
     reply = pipeline(msg)
     return {"reply": reply}
+
 
 
 @app.get("/voice_test")
